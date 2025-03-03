@@ -103,7 +103,7 @@ public class TWBR_TS_Test extends TestCase {
         // Set up MCMC:
         MCMC mcmc = new MCMC();
         mcmc.initByName(
-                "chainLength", "1000000",
+                "chainLength", "2000000",
                 "state", state,
                 "distribution", distribution,
                 "operator", operatorTWBR,
@@ -189,7 +189,7 @@ public class TWBR_TS_Test extends TestCase {
         // Set up MCMC:
         MCMC mcmc = new MCMC();
         mcmc.initByName(
-                "chainLength", "1000000",
+                "chainLength", "2000000",
                 "state", state,
                 "distribution", distribution,
                 "operator", operatorTWBR,
