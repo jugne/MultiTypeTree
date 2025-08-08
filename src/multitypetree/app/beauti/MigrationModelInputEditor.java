@@ -16,26 +16,27 @@
  */
 package multitypetree.app.beauti;
 
-import beastfx.app.inputeditor.BEASTObjectInputEditor;
-import beastfx.app.inputeditor.BeautiDoc;
-import beastfx.app.inputeditor.InputEditor;
-import beastfx.app.util.FXUtils;
-import javafx.application.Platform;
-import javafx.embed.swing.SwingNode;
 import beast.base.core.BEASTInterface;
 import beast.base.core.Input;
 import beast.base.inference.parameter.RealParameter;
+import beastfx.app.inputeditor.BEASTObjectInputEditor;
+import beastfx.app.inputeditor.BeautiDoc;
+import beastfx.app.inputeditor.InputEditor;
+import beastfx.app.util.Alert;
+import beastfx.app.util.FXUtils;
+import javafx.application.Platform;
+import javafx.geometry.Insets;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.scene.text.Text;
 import multitypetree.evolution.tree.SCMigrationModel;
 
-import javax.swing.*;
-import javax.swing.border.EtchedBorder;
-import javax.swing.event.TableModelEvent;
-import javax.swing.table.DefaultTableCellRenderer;
-import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableCellRenderer;
-import javax.swing.table.TableColumn;
-import java.awt.*;
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStreamReader;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -44,22 +45,19 @@ import java.util.List;
  *
  * @author Tim Vaughan (tgvaughan@gmail.com)
  */
-public class MigrationModelInputEditor extends BEASTObjectInputEditor { //InputEditor.Base {
+public class MigrationModelInputEditor extends BEASTObjectInputEditor {
 
-    private DefaultTableModel popSizeModel, rateMatrixModel;
-    private DefaultListModel<String> fullTypeListModel, additionalTypeListModel;
-    private ListSelectionModel additionalTypeListSelectionModel;
+    // UI components for migration model editing
+    private ListView<String> listAllTypes, listAdditional;
+    private List<TextField> popSizeTFs, rateMatrixTFs;
+    private Button addTypeButton, remTypeButton, addTypesFromFileButton;
+    private Button loadPopSizesFromFileButton, loadMigRatesFromFileButton;
+    private CheckBox popSizeEstCheckBox, popSizeScaleFactorEstCheckBox;
+    private CheckBox rateMatrixEstCheckBox, rateMatrixScaleFactorEstCheckBox, rateMatrixForwardTimeCheckBox;
+    private boolean fileLoadInProgress = false;
+    private List<String> rowNames = new ArrayList<>();
+
     private SCMigrationModel migModel;
-
-    private JButton addTypeButton, remTypeButton, addTypesFromFileButton;
-    private JButton loadPopSizesFromFileButton, loadMigRatesFromFileButton;
-
-    private JCheckBox popSizeEstCheckBox, popSizeScaleFactorEstCheckBox;
-    private JCheckBox rateMatrixEstCheckBox, rateMatrixScaleFactorEstCheckBox, rateMatrixForwardTimeCheckBox;
-
-    boolean fileLoadInProgress = false;
-
-    List<String> rowNames = new ArrayList<>();
 
     public MigrationModelInputEditor(BeautiDoc doc) {
         super(doc);
@@ -72,413 +70,236 @@ public class MigrationModelInputEditor extends BEASTObjectInputEditor { //InputE
 
     @Override
     public void init(Input<?> input, BEASTInterface beastObject, int itemNr,
-        ExpandOption bExpandOption, boolean bAddButtons) {
-    	
-    	super.init(input, beastObject, itemNr, ExpandOption.TRUE, bAddButtons);
-    	
-    	
-    	if (this.pane != null) {
-    		// get here when refreshing
-    		pane.getChildren().clear();
-    	} else {    	
-    		this.pane = FXUtils.newHBox();
-    		getChildren().add(pane);
-    	}
+                     ExpandOption bExpandOption, boolean bAddButtons) {
 
-        // Set up fields
-        m_bAddButtons = bAddButtons;
-        m_input = input;
-        m_beastObject = beastObject;
-		this.itemNr = itemNr;
+        super.init(input, beastObject, itemNr, ExpandOption.TRUE, bAddButtons);
 
-        // Adds label to left of input editor
+
+        if (this.pane != null) {
+            // get here when refreshing
+            pane.getChildren().clear();
+        } else {
+            this.pane = FXUtils.newHBox();
+            getChildren().add(pane);
+        }
+
         addInputLabel();
 
-        // Create component models and fill them with data from input
+        // Initialize fields and models
         migModel = (SCMigrationModel) input.get();
-        fullTypeListModel = new DefaultListModel<>();
-        additionalTypeListModel = new DefaultListModel<>();
-        popSizeModel = new DefaultTableModel();
-        rateMatrixModel = new DefaultTableModel() {
-            @Override
-            public boolean isCellEditable(int row, int column) {
-                return row != column && column != migModel.getNTypes();
-            }
-        };
-        popSizeEstCheckBox = new JCheckBox("estimate pop. sizes");
-        rateMatrixEstCheckBox = new JCheckBox("estimate mig. rates");
-        popSizeScaleFactorEstCheckBox = new JCheckBox("estimate scale factor");
-        rateMatrixScaleFactorEstCheckBox = new JCheckBox("estimate scale factor");
-        rateMatrixForwardTimeCheckBox = new JCheckBox("forward-time rate matrix");
+        popSizeTFs = new ArrayList<>();
+        rateMatrixTFs = new ArrayList<>();
+        listAllTypes = new ListView<>();
+        listAdditional = new ListView<>();
+
+        // configure list views for "All types" and "Additional types"
+        listAllTypes.setPrefSize(200, 250);
+        listAllTypes.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);  // No selection needed, but allow multiple for consistency
+        listAdditional.setPrefSize(200, 200);
+        listAdditional.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
+        // disable the "Remove type" button initially (no selection)
+        remTypeButton = new Button("-");
+        remTypeButton.setDisable(true);
+
+        // other buttons for the type list
+        addTypeButton = new Button("+");
+        addTypesFromFileButton = new Button("Add from file...");
+
+        // buttons for loading pop sizes and mig rates from file
+        loadPopSizesFromFileButton = new Button("Load from file...");
+        loadMigRatesFromFileButton = new Button("Load from file...");
+
+        // checkboxes
+        popSizeEstCheckBox = new CheckBox("estimate pop. sizes");
+        popSizeScaleFactorEstCheckBox = new CheckBox("estimate scale factor");
+        rateMatrixEstCheckBox = new CheckBox("estimate mig. rates");
+        rateMatrixScaleFactorEstCheckBox = new CheckBox("estimate scale factor");
+        rateMatrixForwardTimeCheckBox = new CheckBox("forward-time rate matrix");
+
+        // layout
+        GridPane gridPane = new GridPane();
+        gridPane.setVgap(10);
+
+        // top row: type list label and the two lists side by side:
+        // 1. all types
+        // 2. additional types
+        Text titleLabel = new Text("Type list:");
+        titleLabel.setStyle("-fx-font-weight: bold");
+        Label labelLeft = new Label("All types");
+        Label labelRight = new Label("Additional types");
+
+        // always show scroll bars
+        ScrollPane allTypesScroll = new ScrollPane(listAllTypes);
+        allTypesScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.ALWAYS);
+        ScrollPane additionalScroll = new ScrollPane(listAdditional);
+        additionalScroll.setVbarPolicy(ScrollPane.ScrollBarPolicy.ALWAYS);
+        // "All types" in a vertical box with label
+        VBox tlBoxLeft = FXUtils.newVBox();
+        tlBoxLeft.getChildren().add(labelLeft);
+        tlBoxLeft.getChildren().add(allTypesScroll);
+        // "Additional types" in a vertical box with label and buttons
+        VBox tlBoxRight = FXUtils.newVBox();
+        tlBoxRight.getChildren().add(labelRight);
+        tlBoxRight.getChildren().add(additionalScroll);
+        HBox addRemBox = FXUtils.newHBox();
+        addRemBox.getChildren().add(addTypeButton);
+        addRemBox.getChildren().add(remTypeButton);
+        addRemBox.getChildren().add(addTypesFromFileButton);
+        tlBoxRight.getChildren().add(addRemBox);
+        // title and the two list boxes to the grid
+        gridPane.add(titleLabel, 0, 0);
+        gridPane.add(tlBoxLeft, 1, 0);
+        gridPane.add(tlBoxRight, 2, 0);
+
+        // second row: pop sizes label + file button (left), pop size fields (center), estimate checkboxes (right)
+        VBox psBox = FXUtils.newVBox();
+        psBox.getChildren().add(new Label("Population sizes: "));
+        psBox.getChildren().add(loadPopSizesFromFileButton);
+        gridPane.add(psBox, 0, 1);
+
+        // third row: mig rates label + file button (left), mig matrix grid (center), estimate checkboxes (right)
+        VBox mrBox = FXUtils.newVBox();
+        mrBox.getChildren().add(new Label("Migration rates: "));
+        mrBox.getChildren().add(loadMigRatesFromFileButton);
+        gridPane.add(mrBox, 0, 2);
+
+        // load current values from the migration model
         loadFromMigrationModel();
 
-        JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(new EtchedBorder());
+        // popSizeTFs and rateMatrixTFs are filled. Need to add them to the layout
+        // add pop size text fields in one horizontal row
+        HBox popSizeRow = new HBox();
+        popSizeRow.getChildren().addAll(popSizeTFs);
+        gridPane.add(popSizeRow, 1, 1, 2, 1);
+        // pop size estimate checkboxes on the right
+        VBox popEstBox = FXUtils.newVBox();
+        popEstBox.getChildren().add(popSizeEstCheckBox);
+        popEstBox.getChildren().add(popSizeScaleFactorEstCheckBox);
+        gridPane.add(popEstBox, 3, 1);
 
-        GridBagConstraints c = new GridBagConstraints();
-        c.insets = new Insets(3, 3, 3, 3);
-        c.weighty = 0.5;
+        // mig rate matrix fields
+        VBox rateMatrixBox = drawRateMatrixBox();
+        gridPane.add(rateMatrixBox, 1, 2, 2, 1);
+        // mig rates checkboxes on the right
+        VBox rateEstBox = FXUtils.newVBox();
+        rateEstBox.getChildren().add(rateMatrixEstCheckBox);
+        rateEstBox.getChildren().add(rateMatrixScaleFactorEstCheckBox);
+        rateEstBox.getChildren().add(rateMatrixForwardTimeCheckBox);
+        gridPane.add(rateEstBox, 3, 2);
 
-        // Type list:
-        c.gridx = 0;
-        c.gridy = 0;
-        c.weightx = 0.0;
-        c.anchor = GridBagConstraints.LINE_END;
-        panel.add(new JLabel("<html><body>Type list:</body></html>"), c);
+        // labels for the matrix
+        Text legend1 = new Text("Rows: sources, columns: sinks (backwards in time)");
+        Label legend2 = new Label("Correspondence between row/col indices\nand deme names shown to right of matrix.");
+        legend2.setWrapText(true);
+        legend2.setMaxWidth(500);
+        gridPane.add(legend1, 1, 3, 2, 1);
+        gridPane.add(legend2, 1, 4, 2, 1);
 
-        JList<String> jlist;
+        pane.getChildren().add(gridPane);
 
-        Box tlBox = Box.createHorizontalBox();
-        Box tlBoxLeft = Box.createVerticalBox();
-        JLabel labelLeft = new JLabel("All types");
-        tlBoxLeft.add(labelLeft);
-        jlist = new JList<>(fullTypeListModel);
-        jlist.setSelectionModel(new DefaultListSelectionModel() {
-            @Override
-            public void setSelectionInterval(int index0, int index1) {
-                super.setSelectionInterval(-1, -1);
+
+        // Enable/disable the remove-type button based on selection in the additional types list
+        listAdditional.getSelectionModel().selectedItemProperty().addListener((obs, oldVal, newVal) -> {
+            if (listAdditional.getSelectionModel().isEmpty()) {
+                remTypeButton.setDisable(true);
+            } else {
+                remTypeButton.setDisable(false);
             }
         });
-        JScrollPane listScrollPane = new JScrollPane(jlist);
-        listScrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
-        tlBoxLeft.add(listScrollPane);
-        tlBox.add(tlBoxLeft);
 
-        Box tlBoxRight = Box.createVerticalBox();
-        JLabel labelRight = new JLabel("Additional types");
-        tlBoxRight.add(labelRight);
-        jlist = new JList<>(additionalTypeListModel);
-        additionalTypeListSelectionModel = jlist.getSelectionModel();
-        listScrollPane = new JScrollPane(jlist);
-        listScrollPane.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_ALWAYS);
-        tlBoxRight.add(listScrollPane);
-        Box addRemBox = Box.createHorizontalBox();
-        addTypeButton = new JButton("+");
-        remTypeButton = new JButton("-");
-        remTypeButton.setEnabled(false);
-        addTypesFromFileButton = new JButton("Add from file...");
-        addRemBox.add(addTypeButton);
-        addRemBox.add(remTypeButton);
-        addRemBox.add(addTypesFromFileButton);
-        tlBoxRight.add(addRemBox);
-        tlBox.add(tlBoxRight);
+        // save changes when op size checkbox is selected
+        popSizeEstCheckBox.setOnAction(e -> saveToMigrationModel());
+        popSizeScaleFactorEstCheckBox.setOnAction(e -> saveToMigrationModel());
+        rateMatrixEstCheckBox.setOnAction(e -> saveToMigrationModel());
+        rateMatrixScaleFactorEstCheckBox.setOnAction(e -> saveToMigrationModel());
+        rateMatrixForwardTimeCheckBox.setOnAction(e -> saveToMigrationModel());
 
-        c.gridx = 1;
-        c.gridy = 0;
-        c.weightx = 1.0;
-        c.anchor = GridBagConstraints.LINE_START;
-        panel.add(tlBox, c);
-
-        // Population size table
-        c.gridx = 0;
-        c.gridy = 1;
-        c.weightx = 0.0;
-        c.anchor = GridBagConstraints.LINE_END;
-        Box  psBox = Box.createVerticalBox();
-        psBox.add(new JLabel("Population sizes: "), c);
-        loadPopSizesFromFileButton = new JButton("Load from file...");
-        psBox.add(loadPopSizesFromFileButton);
-        panel.add(psBox, c);
-
-        
-        JTable popSizeTable = new JTable(popSizeModel) {
-            @Override
-            public TableCellRenderer getCellRenderer(int row, int column) {
-                return new DefaultTableCellRenderer() {
-                    @Override
-                    public Component getTableCellRendererComponent(
-                            JTable table, Object value, boolean isSelected,
-                            boolean hasFocus, int row, int column) {
-                        setHorizontalAlignment(SwingConstants.CENTER);
-                        return super.getTableCellRendererComponent(
-                                table, value, isSelected, hasFocus, row, column);
-                    }
-                };
-            }
-        };
-        popSizeTable.setShowVerticalLines(true);
-        popSizeTable.setCellSelectionEnabled(true);
-        popSizeTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        popSizeTable.setMaximumSize(new Dimension(100, Short.MAX_VALUE));
-
-        c.gridx = 1;
-        c.gridy = 1;
-        c.weightx = 1.0;
-        c.anchor = GridBagConstraints.LINE_START;
-        panel.add(popSizeTable, c);
-
-        popSizeEstCheckBox.setSelected(((RealParameter)migModel.popSizesInput.get()).isEstimatedInput.get());
-        popSizeScaleFactorEstCheckBox.setSelected(((RealParameter)migModel.popSizesScaleFactorInput.get()).isEstimatedInput.get());
-        c.gridx = 2;
-        c.gridy = 1;
-        c.anchor = GridBagConstraints.LINE_END;
-        c.weightx = 1.0;
-        Box estBox = Box.createVerticalBox();
-        estBox.add(popSizeEstCheckBox);
-        estBox.add(popSizeScaleFactorEstCheckBox);
-        panel.add(estBox, c);
-
-        // Migration rate table
-        // (Uses custom cell renderer to grey out diagonal elements.)
-        c.gridx = 0;
-        c.gridy = 2;
-        c.weightx = 0.0;
-        c.anchor = GridBagConstraints.LINE_END;
-        Box mrBox = Box.createVerticalBox();
-        mrBox.add(new JLabel("Migration rates: "), c);
-        loadMigRatesFromFileButton = new JButton("Load from file...");
-        mrBox.add(loadMigRatesFromFileButton);
-        panel.add(mrBox, c);
-
-        JTable rateMatrixTable = new JTable(rateMatrixModel) {
-            @Override
-            public TableCellRenderer getCellRenderer(int row, int column) {
-
-                return new DefaultTableCellRenderer() {
-                            @Override
-                            public Component getTableCellRendererComponent(
-                                    JTable table, Object value, boolean isSelected,
-                                    boolean hasFocus, int row, int column) {
-
-
-
-                                if (row == column) {
-                                    JLabel label = new JLabel();
-                                    label.setOpaque(true);
-                                    label.setBackground(Color.GRAY);
-
-                                    return label;
-
-                                } else {
-
-                                    Component c = super.getTableCellRendererComponent(
-                                        table, value, isSelected, hasFocus, row, column);
-
-                                    if (column == migModel.getNTypes()) {
-                                        c.setBackground(panel.getBackground());
-                                        c.setForeground(Color.gray);
-                                        setHorizontalAlignment(SwingConstants.LEFT);
-                                    } else {
-                                        int l = 1, r = 1, t = 1, b=1;
-                                        if (column>0)
-                                            l = 0;
-                                        if (row>0)
-                                            t = 0;
-
-                                        setBorder(BorderFactory.createMatteBorder(t, l, b, r, Color.GRAY));
-                                        setHorizontalAlignment(SwingConstants.CENTER);
-                                    }
-                                    return c;
-                                }
-                            }
-                };
-            }
-        };
-        rateMatrixTable.setShowGrid(false);
-        rateMatrixTable.setIntercellSpacing(new Dimension(0,0));
-        rateMatrixTable.setCellSelectionEnabled(true);
-        rateMatrixTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        rateMatrixTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
-        TableColumn col = rateMatrixTable.getColumnModel().getColumn(migModel.getNTypes());
-
-        
-        FontMetrics metrics = new Canvas().getFontMetrics(panel.getFont());
-        int maxWidth = 0;
-        for (String rowName : rowNames)
-            maxWidth = Math.max(maxWidth, metrics.stringWidth(rowName + "M"));
-        col.setPreferredWidth(maxWidth);
-
-        c.gridx = 1;
-        c.gridy = 2;
-        c.anchor = GridBagConstraints.LINE_START;
-        c.weightx = 1.0;
-        panel.add(rateMatrixTable, c);
-
-        rateMatrixEstCheckBox.setSelected(((RealParameter)migModel.rateMatrixInput.get()).isEstimatedInput.get());
-        rateMatrixScaleFactorEstCheckBox.setSelected(((RealParameter)migModel.rateMatrixScaleFactorInput.get()).isEstimatedInput.get());
-        rateMatrixForwardTimeCheckBox.setSelected(migModel.useForwardMigrationRatesInput.get());
-        c.gridx = 2;
-        c.gridy = 2;
-        c.anchor = GridBagConstraints.LINE_END;
-        c.weightx = 1.0;
-        estBox = Box.createVerticalBox();
-        estBox.add(rateMatrixEstCheckBox);
-        estBox.add(rateMatrixScaleFactorEstCheckBox);
-        estBox.add(rateMatrixForwardTimeCheckBox);
-        panel.add(estBox, c);
-
-        c.gridx = 1;
-        c.gridy = 3;
-        c.anchor = GridBagConstraints.LINE_START;
-        c.weightx = 1.0;
-        panel.add(new JLabel("Rows: sources, columns: sinks (backwards in time)"), c);
-
-        c.gridx = 1;
-        c.gridy = 4;
-        c.anchor = GridBagConstraints.LINE_START;
-        c.weightx = 1.0;
-        JLabel multilineLabel = new JLabel();
-        multilineLabel.setText("<html><body>Correspondence between row/col indices<br>"
-                + "and deme names shown to right of matrix.</body></html>");
-        panel.add(multilineLabel, c);
-
-        //add(panel);
-        SwingNode n = new SwingNode();
-        n.setContent(panel);
-        this.pane.getChildren().add(n);
- 
-
-        // Event handlers
-        popSizeModel.addTableModelListener(e -> {
-            if (e.getType() != TableModelEvent.UPDATE)
-                return;
-            
-            if (!fileLoadInProgress)
-                saveToMigrationModel();
-        });
-
-        popSizeEstCheckBox.addItemListener(e -> saveToMigrationModel());
-
-        popSizeScaleFactorEstCheckBox.addItemListener(e -> saveToMigrationModel());
-
-        rateMatrixModel.addTableModelListener(e -> {
-            if (e.getType() != TableModelEvent.UPDATE)
-                return;
-
-            if (!fileLoadInProgress)
-                saveToMigrationModel();
-        });
-
-        rateMatrixEstCheckBox.addItemListener(e -> saveToMigrationModel());
-
-        rateMatrixScaleFactorEstCheckBox.addItemListener(e -> saveToMigrationModel());
-
-        rateMatrixForwardTimeCheckBox.addItemListener(e -> saveToMigrationModel());
-
-        addTypeButton.addActionListener(e -> {
-            String newTypeName = JOptionPane.showInputDialog("Name of type");
-
-            if (newTypeName != null) {
+        // adding new type: prompt for name and add to additional types list
+        addTypeButton.setOnAction(e -> {
+            TextInputDialog dialog = new TextInputDialog();
+            dialog.setTitle("Name of type");
+            dialog.setHeaderText(null);
+            dialog.setContentText("Enter new type name:");
+            dialog.showAndWait().ifPresent(newTypeName -> {
                 if (migModel.getTypeSet().containsTypeWithName(newTypeName)) {
-                    JOptionPane.showMessageDialog(panel, "Type with this name already present.",
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    // show error if a type with this name already exists
+                    Alert.showMessageDialog(pane, "Type with this name already present.", "Error", Alert.ERROR_MESSAGE);
                 } else {
-                    additionalTypeListModel.add(additionalTypeListModel.size(), newTypeName);
-                    saveToMigrationModel();
+                    listAdditional.getItems().add(newTypeName);
+                    saveToMigrationModel();  // update model and refresh UI
                 }
-            }
+            });
         });
 
-        addTypesFromFileButton.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Choose file containing type names (one per line)");
-            fc.setFileSelectionMode(JFileChooser.FILES_ONLY);
-            fc.setMultiSelectionEnabled(false);
-            int result = fc.showDialog(panel, "Load");
-
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File file = fc.getSelectedFile();
-
-                try {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file)));
-
+        // add multiple types from file
+        addTypesFromFileButton.setOnAction(e -> {
+            File file = FXUtils.getLoadFile("Choose file containing type names (one per line)");
+            if (file != null) {
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file)))) {
                     String line;
                     while ((line = reader.readLine()) != null) {
                         line = line.trim();
-                        if (!line.isEmpty())
-                            additionalTypeListModel.add(additionalTypeListModel.size(), line);
+                        if (!line.isEmpty()) {
+                            listAdditional.getItems().add(line);
+                        }
                     }
-
-                    saveToMigrationModel();
-
-                } catch (IOException e1) {
-                    JOptionPane.showMessageDialog(panel,
-                            "Error reading from file: " + e1.getMessage(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    saveToMigrationModel();  // save and refresh after adding all types
+                } catch (IOException ex) {
+                    Alert.showMessageDialog(pane, "Error reading from file: " + ex.getMessage(), "Error", Alert.ERROR_MESSAGE);
                 }
             }
         });
 
-        additionalTypeListSelectionModel.addListSelectionListener(e -> {
-            if (additionalTypeListSelectionModel.getMinSelectionIndex()<0)
-                remTypeButton.setEnabled(false);
-            else
-                remTypeButton.setEnabled(true);
-        });
-
-        remTypeButton.addActionListener(e -> {
-            int selectionMin = additionalTypeListSelectionModel.getMinSelectionIndex();
-            int selectionMax = additionalTypeListSelectionModel.getMaxSelectionIndex();
-
-            additionalTypeListModel.removeRange(selectionMin, selectionMax);
-
-            additionalTypeListSelectionModel.clearSelection();
-
+        // remove selected types from additional types list
+        remTypeButton.setOnAction(e -> {
+            List<String> selected = new ArrayList<>(listAdditional.getSelectionModel().getSelectedItems());
+            listAdditional.getItems().removeAll(selected);
+            listAdditional.getSelectionModel().clearSelection();
             saveToMigrationModel();
         });
 
-        loadPopSizesFromFileButton.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Choose file containing population sizes (one per line)");
-            fc.setFileSelectionMode(JFileChooser.FILES_ONLY);
-            fc.setMultiSelectionEnabled(false);
-            int result = fc.showDialog(panel, "Load");
-
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File file = fc.getSelectedFile();
-
-                try {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file)));
-
+        // load pop sizes from a file (one size per line)
+        loadPopSizesFromFileButton.setOnAction(e -> {
+            File file = FXUtils.getLoadFile("Choose file containing population sizes (one per line)");
+            if (file != null) {
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file)))) {
                     List<Double> popSizes = new ArrayList<>();
                     String line;
                     while ((line = reader.readLine()) != null) {
                         line = line.trim();
-                        if (!line.isEmpty())
+                        if (!line.isEmpty()) {
                             popSizes.add(Double.parseDouble(line));
+                        }
                     }
-
                     if (popSizes.size() == migModel.getNTypes()) {
                         fileLoadInProgress = true;
-
-                        for (int i=0; i<popSizes.size(); i++)
-                            popSizeModel.setValueAt(popSizes.get(i), 0, i);
-
+                        for (int i = 0; i < popSizes.size(); i++) {
+                            if (i < popSizeTFs.size()) {
+                                popSizeTFs.get(i).setText(popSizes.get(i).toString());
+                            }
+                        }
                         fileLoadInProgress = false;
-
                         saveToMigrationModel();
                     } else {
-                        JOptionPane.showMessageDialog(panel,
-                                "<html>File must contain exactly one population<br> size for each type/deme.</html>",
-                                "Error", JOptionPane.ERROR_MESSAGE);
+                        Alert.showMessageDialog(pane,
+                                "File must contain exactly one population size for each type/deme.",
+                                "Error", Alert.ERROR_MESSAGE);
                     }
-
                 } catch (IOException ex) {
-                    JOptionPane.showMessageDialog(panel,
-                            "Error reading from file: " + ex.getMessage(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    Alert.showMessageDialog(pane, "Error reading from file: " + ex.getMessage(), "Error", Alert.ERROR_MESSAGE);
                 } catch (NumberFormatException ex) {
-                    JOptionPane.showMessageDialog(panel,
-                            "<html>File contains non-numeric line. " +
-                                    "Every line must contain<br> exactly one population size.</html>",
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    Alert.showMessageDialog(pane,
+                            "File contains non-numeric line. Every line must contain exactly one population size.",
+                            "Error", Alert.ERROR_MESSAGE);
                 }
             }
         });
 
-        loadMigRatesFromFileButton.addActionListener(e -> {
-            JFileChooser fc = new JFileChooser();
-            fc.setDialogTitle("Choose CSV file containing migration rate matrix (diagonal ignored)");
-            fc.setFileSelectionMode(JFileChooser.FILES_ONLY);
-            fc.setMultiSelectionEnabled(false);
-            int result = fc.showDialog(panel, "Load");
-
-            if (result == JFileChooser.APPROVE_OPTION) {
-                File file = fc.getSelectedFile();
-
-                try {
-                    BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file)));
-
+        // Load migration rate matrix from a CSV file
+        loadMigRatesFromFileButton.setOnAction(e -> {
+            File file = FXUtils.getLoadFile("Choose CSV file containing migration rate matrix (diagonal ignored)");
+            if (file != null) {
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file)))) {
                     List<Double> migRates = new ArrayList<>();
                     String line;
                     while ((line = reader.readLine()) != null) {
@@ -488,48 +309,32 @@ public class MigrationModelInputEditor extends BEASTObjectInputEditor { //InputE
                                 migRates.add(Double.parseDouble(field));
                         }
                     }
-
-                    boolean diagonalsPresent = (migRates.size() == migModel.getNTypes()*migModel.getNTypes());
-                    if (diagonalsPresent || migRates.size() == migModel.getNTypes()*(migModel.getNTypes()-1)) {
-
+                    int n = migModel.getNTypes();
+                    boolean diagonalsPresent = (migRates.size() == n * n);
+                    if (diagonalsPresent || migRates.size() == n * (n - 1)) {
                         fileLoadInProgress = true;
-
-                        for (int i=0; i<migModel.getNTypes(); i++) {
-                            for (int j=0; j<migModel.getNTypes(); j++) {
-                                if (i==j)
-                                    continue;
-
-                                int offset;
-                                if (diagonalsPresent)
-                                    offset = i*migModel.getNTypes() + j;
-                                else {
-                                    offset = i * (migModel.getNTypes() - 1) + j;
-                                    if (j>i)
-                                        offset -= 1;
+                        // each off-diagonal value from file into the appropriate text field
+                        for (int i = 0; i < n; i++) {
+                            for (int j = 0; j < n; j++) {
+                                if (i == j) continue;
+                                int fileIndex = getRateMatrixIndex(i, j, n, diagonalsPresent);
+                                int fieldIndex = getRateMatrixIndex(i, j, n, false);
+                                if (fileIndex < migRates.size() && fieldIndex < rateMatrixTFs.size()) {
+                                    rateMatrixTFs.get(fieldIndex).setText(migRates.get(fileIndex).toString());
                                 }
-
-                                rateMatrixModel.setValueAt(migRates.get(offset), i, j);
                             }
                         }
-
                         fileLoadInProgress = false;
-
                         saveToMigrationModel();
                     } else {
-                        JOptionPane.showMessageDialog(panel,
-                                "<html>CSV file must contain a square matrix with exactly one<br>" +
-                                        "row for each type/deme.</html>",
-                                "Error", JOptionPane.ERROR_MESSAGE);
+                        Alert.showMessageDialog(pane,
+                                "CSV file must contain a square matrix with exactly one row for each type/deme.",
+                                "Error", Alert.ERROR_MESSAGE);
                     }
-
                 } catch (IOException ex) {
-                    JOptionPane.showMessageDialog(panel,
-                            "Error reading from file: " + ex.getMessage(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    Alert.showMessageDialog(pane, "Error reading from file: " + ex.getMessage(), "Error", Alert.ERROR_MESSAGE);
                 } catch (NumberFormatException ex) {
-                    JOptionPane.showMessageDialog(panel,
-                            "<html>CSV file contains non-numeric element.</html",
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                    Alert.showMessageDialog(pane, "CSV file contains non-numeric element.", "Error", Alert.ERROR_MESSAGE);
                 }
             }
         });
@@ -538,114 +343,122 @@ public class MigrationModelInputEditor extends BEASTObjectInputEditor { //InputE
     private void loadFromMigrationModel() {
         migModel.getTypeSet().initAndValidate();
 
-        additionalTypeListModel.clear();
-        if (migModel.getTypeSet().valueInput.get() != null) {
-            for (String typeName : migModel.getTypeSet().valueInput.get().split(","))
-                if (!typeName.isEmpty())
-                    additionalTypeListModel.add(additionalTypeListModel.size(), typeName);
+        listAdditional.getItems().clear();
+        String typeCSV = migModel.getTypeSet().valueInput.get();
+        if (typeCSV != null) {
+            for (String typeName : typeCSV.split(",")) {
+                if (!typeName.isEmpty()) {
+                    listAdditional.getItems().add(typeName);
+                }
+            }
         }
 
-        popSizeModel.setRowCount(1);
-        popSizeModel.setColumnCount(migModel.getNTypes());
-        rateMatrixModel.setRowCount(migModel.getNTypes());
-        rateMatrixModel.setColumnCount(migModel.getNTypes()+1);
-
         List<String> typeNames = migModel.getTypeSet().getTypesAsList();
-        fullTypeListModel.removeAllElements();
-        for (String typeName : typeNames)
-            fullTypeListModel.add(fullTypeListModel.size(), typeName);
+        listAllTypes.getItems().clear();
+        for (String typeName : typeNames) {
+            listAllTypes.getItems().add(typeName);
+        }
 
         rowNames.clear();
         for (int i = 0; i < migModel.getNTypes(); i++) {
-        if (i < typeNames.size())
-            rowNames.add(" " + typeNames.get(i) + " (" + String.valueOf(i) + ") ");
-        else
-            rowNames.add(" (" + String.valueOf(i) + ") ");
-        }
-
-        for (int i=0; i<migModel.getNTypes(); i++) {
-            popSizeModel.setValueAt(migModel.getPopSize(i), 0, i);
-            for (int j=0; j<migModel.getNTypes(); j++) {
-                if (i == j)
-                    continue;
-                rateMatrixModel.setValueAt(migModel.getBackwardRate(i, j), i, j);
+            if (i < typeNames.size()) {
+                // Include type name if available, with index
+                rowNames.add(" " + typeNames.get(i) + " (" + i + ") ");
+            } else {
+                // Fallback for index beyond provided names
+                rowNames.add(" (" + i + ") ");
             }
-
-            rateMatrixModel.setValueAt(rowNames.get(i), i, migModel.getNTypes());
         }
 
-        popSizeEstCheckBox.setSelected(((RealParameter)migModel.popSizesInput.get()).isEstimatedInput.get());
-        rateMatrixEstCheckBox.setSelected(((RealParameter)migModel.rateMatrixInput.get()).isEstimatedInput.get());
+        popSizeTFs.clear();
+        RealParameter popSizesParam = (RealParameter) migModel.popSizesInput.get();
+        for (int i = 0; i < migModel.getNTypes(); i++) {
+            double popSizeVal = migModel.getPopSize(i);
+            // Create a TextField for this population size value
+            TextField tf = createParameterTextField(popSizesParam, i, popSizeVal, "");
+            popSizeTFs.add(tf);
+        }
+
+        rateMatrixTFs.clear();
+        RealParameter rateParam = (RealParameter) migModel.rateMatrixInput.get();
+        int n = migModel.getNTypes();
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                if (i == j) continue;  // skip diagonal
+                // Compute the index in the flat (N*(N-1)) parameter for this rate
+                int idx = getRateMatrixIndex(i, j, n, false);
+                double rateVal = migModel.getBackwardRate(i, j);
+                TextField tf = createParameterTextField(rateParam, idx, rateVal, "");
+                rateMatrixTFs.add(tf);
+            }
+        }
+
+        // initial states of checkboxes
+        popSizeEstCheckBox.setSelected(((RealParameter) migModel.popSizesInput.get()).isEstimatedInput.get());
+        popSizeScaleFactorEstCheckBox.setSelected(((RealParameter) migModel.popSizesScaleFactorInput.get()).isEstimatedInput.get());
+        rateMatrixEstCheckBox.setSelected(((RealParameter) migModel.rateMatrixInput.get()).isEstimatedInput.get());
+        rateMatrixScaleFactorEstCheckBox.setSelected(((RealParameter) migModel.rateMatrixScaleFactorInput.get()).isEstimatedInput.get());
         rateMatrixForwardTimeCheckBox.setSelected(migModel.useForwardMigrationRatesInput.get());
     }
 
     private void saveToMigrationModel() {
-
-        StringBuilder sbAdditionalTypes = new StringBuilder();
-        for (int i=0; i<additionalTypeListModel.size(); i++) {
-            if (i > 0)
-                sbAdditionalTypes.append(",");
-            sbAdditionalTypes.append(additionalTypeListModel.get(i));
+        StringBuilder sbAdditional = new StringBuilder();
+        for (int i = 0; i < listAdditional.getItems().size(); i++) {
+            if (i > 0) sbAdditional.append(",");
+            sbAdditional.append(listAdditional.getItems().get(i));
         }
-
-        migModel.typeSetInput.get().valueInput.setValue(
-                sbAdditionalTypes.toString(),
-                migModel.typeSetInput.get());
+        migModel.typeSetInput.get().valueInput.setValue(sbAdditional.toString(), migModel.typeSetInput.get());
         migModel.typeSetInput.get().initAndValidate();
 
-        StringBuilder sbPopSize = new StringBuilder();
-        for (int i=0; i<migModel.getNTypes(); i++) {
-            if (i>0)
-                sbPopSize.append(" ");
-
-            if (i < popSizeModel.getColumnCount() && popSizeModel.getValueAt(0, i) != null)
-                sbPopSize.append(popSizeModel.getValueAt(0, i));
-            else
-                sbPopSize.append("1.0");
-        }
-        ((RealParameter)migModel.popSizesInput.get()).setDimension(migModel.getNTypes());
-        ((RealParameter)migModel.popSizesInput.get()).valuesInput.setValue(
-            sbPopSize.toString(),
-                (RealParameter)migModel.popSizesInput.get());
-
-        StringBuilder sbRateMatrix = new StringBuilder();
-        boolean first = true;
-        for (int i=0; i<migModel.getNTypes(); i++) {
-            for (int j=0; j<migModel.getNTypes(); j++) {
-                if (i == j)
-                    continue;
-
-                if (first)
-                    first = false;
-                else
-                    sbRateMatrix.append(" ");
-
-                if (i<rateMatrixModel.getRowCount() && j<rateMatrixModel.getColumnCount()-1 && rateMatrixModel.getValueAt(i, j) != null)
-                    sbRateMatrix.append(rateMatrixModel.getValueAt(i, j));
-                else
-                    sbRateMatrix.append("1.0");
+        // update pop size
+        StringBuilder sbPopSizes = new StringBuilder();
+        for (int i = 0; i < migModel.getNTypes(); i++) {
+            if (i > 0) sbPopSizes.append(" ");
+            if (i < popSizeTFs.size() && popSizeTFs.get(i) != null) {
+                sbPopSizes.append(popSizeTFs.get(i).getText());
+            } else {
+                sbPopSizes.append("1.0");
             }
         }
-        ((RealParameter)migModel.rateMatrixInput.get()).setDimension(
-            migModel.getNTypes()*(migModel.getNTypes()-1));
-        ((RealParameter)migModel.rateMatrixInput.get()).valuesInput.setValue(
-            sbRateMatrix.toString(),
-                (RealParameter)migModel.rateMatrixInput.get());
+        RealParameter popSizesParam = (RealParameter) migModel.popSizesInput.get();
+        popSizesParam.setDimension(migModel.getNTypes());
+        popSizesParam.valuesInput.setValue(sbPopSizes.toString(), popSizesParam);
 
-        ((RealParameter)migModel.popSizesInput.get()).isEstimatedInput.setValue(
-            popSizeEstCheckBox.isSelected(), (RealParameter)migModel.popSizesInput.get());
-        ((RealParameter)migModel.popSizesScaleFactorInput.get()).isEstimatedInput.setValue(
-                popSizeScaleFactorEstCheckBox.isSelected(), (RealParameter)migModel.popSizesScaleFactorInput.get());
-        ((RealParameter)migModel.rateMatrixInput.get()).isEstimatedInput.setValue(
-            rateMatrixEstCheckBox.isSelected(), (RealParameter)migModel.rateMatrixInput.get());
-        ((RealParameter)migModel.rateMatrixScaleFactorInput.get()).isEstimatedInput.setValue(
-                rateMatrixScaleFactorEstCheckBox.isSelected(), (RealParameter)migModel.rateMatrixScaleFactorInput.get());
-        migModel.useForwardMigrationRatesInput.setValue(
-                rateMatrixForwardTimeCheckBox.isSelected(), migModel);
+        // update rateMatrix
+        StringBuilder sbRates = new StringBuilder();
+        boolean first = true;
+        int n = migModel.getNTypes();
+        for (int i = 0; i < n; i++) {
+            for (int j = 0; j < n; j++) {
+                if (i == j) continue;
+                if (!first) {
+                    sbRates.append(" ");
+                } else {
+                    first = false;
+                }
+                int idx = getRateMatrixIndex(i, j, n, false);
+                if (idx < rateMatrixTFs.size() && rateMatrixTFs.get(idx) != null) {
+                    sbRates.append(rateMatrixTFs.get(idx).getText());
+                } else {
+                    sbRates.append("1.0");
+                }
+            }
+        }
+        RealParameter rateParam = (RealParameter) migModel.rateMatrixInput.get();
+        // dim: # of off-diagonal entries
+        rateParam.setDimension(n * (n - 1));
+        rateParam.valuesInput.setValue(sbRates.toString(), rateParam);
+
+        // update flags
+        ((RealParameter) migModel.popSizesInput.get()).isEstimatedInput.setValue(popSizeEstCheckBox.isSelected(), popSizesParam);
+        ((RealParameter) migModel.popSizesScaleFactorInput.get()).isEstimatedInput.setValue(popSizeScaleFactorEstCheckBox.isSelected(), (RealParameter) migModel.popSizesScaleFactorInput.get());
+        rateParam.isEstimatedInput.setValue(rateMatrixEstCheckBox.isSelected(), rateParam);
+        ((RealParameter) migModel.rateMatrixScaleFactorInput.get()).isEstimatedInput.setValue(rateMatrixScaleFactorEstCheckBox.isSelected(), (RealParameter) migModel.rateMatrixScaleFactorInput.get());
+        migModel.useForwardMigrationRatesInput.setValue(rateMatrixForwardTimeCheckBox.isSelected(), migModel);
 
         try {
-            ((RealParameter)migModel.rateMatrixInput.get()).initAndValidate();
-            ((RealParameter)migModel.popSizesInput.get()).initAndValidate();
+            rateParam.initAndValidate();
+            popSizesParam.initAndValidate();
             migModel.initAndValidate();
         } catch (Exception ex) {
             System.err.println("Error updating migration model state.");
@@ -654,7 +467,110 @@ public class MigrationModelInputEditor extends BEASTObjectInputEditor { //InputE
         refreshPanel();
         Platform.runLater(() -> init(m_input, m_beastObject, itemNr, ExpandOption.TRUE, m_bAddButtons));
         sync();
-        
-        
     }
+
+    /** Constructs the migration rate matrix UI (text fields for rates and labels for row names). */
+    private VBox drawRateMatrixBox() {
+        VBox matrixColumn = new VBox();
+        int n = migModel.getNTypes();
+        // each row of the matrix is an HBox
+        for (int i = 0; i < n; i++) {
+            HBox rowBox = new HBox();
+            for (int j = 0; j < n; j++) {
+                if (i == j) {
+                    // diag elements: greyed out to indicate no self-migration
+                    TextField diagField = new TextField();
+                    diagField.setDisable(true);
+                    diagField.setPrefWidth(70);
+                    diagField.setBackground(new Background(new BackgroundFill(Color.DARKGRAY, CornerRadii.EMPTY, Insets.EMPTY)));
+                    rowBox.getChildren().add(diagField);
+                } else {
+                    // off-diag: use the corresponding TextField from rateMatrixTFs list
+                    int idx = getRateMatrixIndex(i, j, n, false);
+                    if (idx < rateMatrixTFs.size()) {
+                        rowBox.getChildren().add(rateMatrixTFs.get(idx));
+                    }
+                }
+            }
+            // label at the end of the row with the type name and index
+            Label rowLabel = new Label(rowNames.get(i));
+            rowLabel.setTextFill(Color.GRAY);
+            // add a small left margin
+            HBox.setMargin(rowLabel, new Insets(0, 0, 0, 5));
+            rowBox.getChildren().add(rowLabel);
+            matrixColumn.getChildren().add(rowBox);
+        }
+        return matrixColumn;
+    }
+
+    /**
+     * Compute the index in a flattened (one-dimensional) array for the migration rate element (i,j).
+     * This matches how the RealParameter for rate matrix is structured (off-diagonals only).
+     * @param i  row index (source deme)
+     * @param j  column index (destination deme)
+     * @param nTypes total number of types (demes)
+     * @param diagonalsPresent whether the index should be computed as if diagonal elements are present in the array
+     * @return index in the flat array corresponding to rate[i][j]
+     */
+    private int getRateMatrixIndex(int i, int j, int nTypes, boolean diagonalsPresent) {
+        if (i == j) {
+            throw new IllegalArgumentException("Diagonal elements have no index in rate matrix array.");
+        }
+        int idx;
+        if (diagonalsPresent) {
+            // if diagonal entries are considered
+            idx = i * nTypes + j;
+        } else {
+            // no diagonals in array
+            idx = i * (nTypes - 1) + j;
+            if (j > i) {
+                idx -= 1;
+            }
+        }
+        return idx;
+    }
+
+    private TextField createParameterTextField(RealParameter param, int index, double value, String tooltip) {
+        TextField tf = new TextField(Double.toString(value));
+        tf.setPrefWidth(70);
+        if (!tooltip.isEmpty()) {
+            tf.setTooltip(new Tooltip(tooltip));
+        }
+
+        // Live update of in‐memory parameter
+        tf.textProperty().addListener((obs, oldVal, newVal) -> {
+            if (!fileLoadInProgress && !oldVal.equals(newVal)) {
+                try {
+                    param.setValue(index, Double.parseDouble(newVal));
+                } catch (NumberFormatException ex) { /* ignore */ }
+            }
+        });
+
+        // On Enter, push into the model inputs & re‐serialize
+        tf.setOnAction(e -> {
+            try {
+                saveToMigrationModel();
+            } catch (Exception ex) {
+                Alert.showMessageDialog(pane,
+                        "Failed to save pop-size/migration-rate value: " + ex.getMessage(),
+                        "Error", Alert.ERROR_MESSAGE);
+            }
+        });
+
+        // On focus lost, same commit
+        tf.focusedProperty().addListener((obs, wasFocused, isNowFocused) -> {
+            if (wasFocused && !isNowFocused) {
+                try {
+                    saveToMigrationModel();
+                } catch (Exception ex) {
+                    Alert.showMessageDialog(pane,
+                            "Failed to save pop-size/migration-rate value: " + ex.getMessage(),
+                            "Error", Alert.ERROR_MESSAGE);
+                }
+            }
+        });
+
+        return tf;
+    }
+
 }
